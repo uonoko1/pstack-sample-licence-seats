@@ -23,7 +23,7 @@ final class Licences private (
       case Command.Revoke(user) =>
         Right(Licences(plan, holders - user, handled))
       case Command.ChangePlan(target) =>
-        fitted(target, holders).left.map(Rejection.TooManyHolders(_, holders.size))
+        Right(Licences(target, holders, handled))
 
   /** Left is the seat count that `newHolders` exceed. Only a limited plan has one. */
   private def fitted(newPlan: Plan, newHolders: Set[UserId]): Either[Int, Licences] =

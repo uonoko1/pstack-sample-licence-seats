@@ -1,20 +1,6 @@
 package licenceseats
 
-import java.util.UUID
-
-class LicencesSuite extends munit.FunSuite:
-
-  private def user(n: Int): UserId = UserId(s"user-$n")
-
-  private def users(count: Int): Set[UserId] = (1 to count).map(user).toSet
-
-  private def fresh(command: Command): Request =
-    Request(RequestId(UUID.randomUUID().toString), command)
-
-  private def withHolders(plan: Plan, count: Int): Licences =
-    users(count).foldLeft(Licences.empty(plan)) { (licences, holder) =>
-      licences.handle(fresh(Command.Grant(holder)))._1
-    }
+class LicencesSuite extends munit.FunSuite, Fixtures:
 
   for (plan, seats) <- List(Plan.Free -> 10, Plan.Starter -> 30) do
     test(s"$plan accepts $seats grants and rejects the next one") {

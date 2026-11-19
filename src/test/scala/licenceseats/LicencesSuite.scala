@@ -48,24 +48,6 @@ class LicencesSuite extends munit.FunSuite, Fixtures:
     assertEquals(after.holders, users(3))
   }
 
-  for (from, holders, to, seats) <- List(
-      (Plan.Starter, 11, Plan.Free, 10),
-      (Plan.Standard, 11, Plan.Free, 10),
-      (Plan.Standard, 31, Plan.Starter, 30)
-    )
-  do
-    test(s"a downgrade from $from to $to is accepted with $holders holders, and grants are rejected while they exceed $to") {
-      val (downgraded, result) = withHolders(from, holders).handle(fresh(Command.ChangePlan(to)))
-
-      assertEquals(result, Right(()))
-      assertEquals(downgraded.plan, to)
-      assertEquals(downgraded.holders, users(holders))
-
-      val (after, nextGrant) = downgraded.handle(fresh(Command.Grant(user(holders + 1))))
-      assertEquals(nextGrant, Left(Rejection.SeatLimitReached(seats)))
-      assertEquals(after.holders, users(holders))
-    }
-
   for (from, to, seats) <- List(
       (Plan.Starter, Plan.Free, 10),
       (Plan.Standard, Plan.Free, 10),

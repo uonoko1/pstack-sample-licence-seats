@@ -61,3 +61,29 @@ class LicenceManagerSuite extends munit.FunSuite:
       assertEquals(rejections, Seq.fill(54)(Rejection.SeatLimitReached(10)))
       assertEquals(manager.licences.holders, accepted.toSet)
   }
+
+  pool.test("a grant made while a batch is in flight keeps its licence and counts against the seat limit") { pool =>
+    val manager = LicenceManager(Plan.Free)
+    val batchUsers = (1 to 10).map(n => UserId(s"batch-$n"))
+    val solo = UserId("solo")
+    def grant(user: UserId) = Request(RequestId(s"grant-${user.value}"), Command.Grant(user), Instant.EPOCH)
+    val batchStarted = CountDownLatch(1)
+    val soloHandled = CountDownLatch(1)
+    val batch = LazyList.tabulate(batchUsers.size) { n =>
+      if n == batchUsers.size / 2 then
+        batchStarted.countDown()
+        soloHandled.await(10, TimeUnit.SECONDS)
+      grant(batchUsers(n))
+    }
+    val handleBatch: Callable[Seq[Result]] = () => manager.handleAll(batch)
+
+    val batchResults = pool.submit(handleBatch)
+    batchStarted.await(10, TimeUnit.SECONDS)
+    val soloResult = manager.handle(grant(solo))
+    soloHandled.countDown()
+
+    val results = batchUsers.zip(batchResults.get(10, TimeUnit.SECONDS)) :+ (solo -> soloResult)
+    val accepted = results.collect { case (user, Right(())) => user }
+    assertEquals(manager.licences.holders, accepted.toSet)
+    assertEquals(accepted.size, 10)
+  }

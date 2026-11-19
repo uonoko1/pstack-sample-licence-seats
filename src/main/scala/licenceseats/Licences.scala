@@ -35,7 +35,9 @@ final class Licences private (
       case Command.Revoke(user) =>
         Right(updated(plan, holders - user, at))
       case Command.ChangePlan(target) =>
-        Right(updated(target, holders, at))
+        (standingAt(at), exceeded(target, holders)) match
+          case (Standing.Suspended, Some(seats)) => Left(Rejection.Suspended(seats, holders.size))
+          case _ => Right(updated(target, holders, at))
 
   /** The seat count that `newHolders` exceed. Only a limited plan has one. */
   private def exceeded(newPlan: Plan, newHolders: Set[UserId]): Option[Int] =

@@ -121,3 +121,38 @@ class GracePeriodSuite extends munit.FunSuite, Fixtures:
     assertEquals(result, Right(()))
     assertEquals(fitting.standingAt(day(20)), Standing.Normal)
   }
+
+  test("a suspended space rejects a change to a plan that the holders still exceed") {
+    val (over, _) = withHolders(Plan.Standard, 31).handle(fresh(Command.ChangePlan(Plan.Free), at = day(0)))
+
+    val (inGrace, beforeDeadline) = over.handle(fresh(Command.ChangePlan(Plan.Starter), at = day(14).minusSeconds(1)))
+    val (suspended, atDeadline) = over.handle(fresh(Command.ChangePlan(Plan.Starter), at = day(14)))
+
+    assertEquals(beforeDeadline, Right(()))
+    assertEquals(inGrace.plan, Plan.Starter)
+    assertEquals(atDeadline, Left(Rejection.Suspended(seats = 30, holders = 31)))
+    assertEquals(suspended.plan, Plan.Free)
+    assertEquals(suspended.standingAt(day(14)), Standing.Suspended)
+  }
+
+  test("a suspended space accepts a change to a plan that the holders fit, and is normal again") {
+    val (upgraded, result) = overFree(holders = 11).handle(fresh(Command.ChangePlan(Plan.Starter), at = day(20)))
+
+    assertEquals(result, Right(()))
+    assertEquals(upgraded.plan, Plan.Starter)
+    assertEquals(upgraded.standingAt(day(20)), Standing.Normal)
+
+    val (after, grantResult) = upgraded.handle(fresh(Command.Grant(user(12)), at = day(20)))
+
+    assertEquals(grantResult, Right(()))
+    assertEquals(after.holders, users(12))
+  }
+
+  test("a space that left suspension accepts a downgrade that the holders exceed, with a new deadline") {
+    val (upgraded, _) = overFree(holders = 11).handle(fresh(Command.ChangePlan(Plan.Starter), at = day(20)))
+
+    val (downgradedAgain, result) = upgraded.handle(fresh(Command.ChangePlan(Plan.Free), at = day(21)))
+
+    assertEquals(result, Right(()))
+    assertEquals(downgradedAgain.standingAt(day(21)), Standing.InGrace(day(35)))
+  }

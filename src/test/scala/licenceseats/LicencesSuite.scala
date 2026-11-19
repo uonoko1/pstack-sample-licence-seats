@@ -99,6 +99,33 @@ class LicencesSuite extends munit.FunSuite, Fixtures:
     assertEquals(after.holders, users(10) - user(1))
   }
 
+  test("a resent downgrade that started the grace period is accepted again after the deadline, and keeps the deadline") {
+    val id = RequestId("downgrade")
+    val (inGrace, first) = withHolders(Plan.Starter, 11).handle(Request(id, Command.ChangePlan(Plan.Free), day(0)))
+    assertEquals(first, Right(()))
+
+    val (after, resent) = inGrace.handle(Request(id, Command.ChangePlan(Plan.Free), day(30)))
+    val (_, sentFresh) = inGrace.handle(fresh(Command.ChangePlan(Plan.Free), at = day(30)))
+
+    assertEquals(resent, Right(()))
+    assertEquals(sentFresh, Left(Rejection.Suspended(seats = 10, holders = 11)))
+    assertEquals(after.standingAt(day(13)), Standing.InGrace(day(14)))
+    assertEquals(after.standingAt(day(30)), Standing.Suspended)
+  }
+
+  test("a resent plan change that a suspended space rejected is rejected again, even after the holders fit the plan") {
+    val change = fresh(Command.ChangePlan(Plan.Starter), at = day(14))
+    val (over, _) = withHolders(Plan.Standard, 31).handle(fresh(Command.ChangePlan(Plan.Free), at = day(0)))
+    val (suspended, first) = over.handle(change)
+    assertEquals(first, Left(Rejection.Suspended(seats = 30, holders = 31)))
+    val (fitting, _) = suspended.handle(fresh(Command.Revoke(user(31)), at = day(15)))
+
+    val (after, resent) = fitting.handle(change.copy(at = day(16)))
+
+    assertEquals(resent, Left(Rejection.Suspended(seats = 30, holders = 31)))
+    assertEquals(after.plan, Plan.Free)
+  }
+
   test("a resent revoke that was accepted revokes nothing new") {
     val revoke = fresh(Command.Revoke(user(1)))
     val (revoked, first) = withHolders(Plan.Free, 1).handle(revoke)

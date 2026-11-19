@@ -1,5 +1,6 @@
 package licenceseats
 
+import java.time.Instant
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
@@ -10,6 +11,7 @@ class LicenceManagerSuite extends munit.FunSuite:
 
   private val contenders = 64
   private val rounds = 200
+  private val now = Instant.parse("2026-01-01T00:00:00Z")
 
   private val pool = FunFixture[ExecutorService](
     setup = _ => Executors.newFixedThreadPool(contenders),
@@ -39,7 +41,7 @@ class LicenceManagerSuite extends munit.FunSuite:
         pool,
         (1 to contenders).map { n =>
           val user = UserId(s"user-$n")
-          () => user -> manager.handle(Request(RequestId(s"grant-$n"), Command.Grant(user)))
+          () => user -> manager.handle(Request(RequestId(s"grant-$n"), Command.Grant(user), now))
         }
       )
 

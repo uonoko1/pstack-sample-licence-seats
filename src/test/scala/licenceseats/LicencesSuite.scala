@@ -129,15 +129,27 @@ class LicencesSuite extends munit.FunSuite, Fixtures:
     assertEquals(after.holders, users(1))
   }
 
+  test("a resend that carries a later time gets the first result") {
+    val id = RequestId("resent-later")
+    val (full, first) = withHolders(Plan.Free, 10).handle(Request(id, Command.Grant(user(11)), day(0)))
+    assertEquals(first, Left(Rejection.SeatLimitReached(10)))
+    val (freed, _) = full.handle(fresh(Command.Revoke(user(1)), at = day(1)))
+
+    val (after, resent) = freed.handle(Request(id, Command.Grant(user(11)), day(400)))
+
+    assertEquals(resent, Left(Rejection.SeatLimitReached(10)))
+    assertEquals(after.holders, users(10) - user(1))
+  }
+
   test("a request ID reused for a different command is rejected, and the first command still replays") {
     val id = RequestId("reused")
-    val (full, first) = withHolders(Plan.Free, 10).handle(Request(id, Command.Grant(user(11))))
+    val (full, first) = withHolders(Plan.Free, 10).handle(Request(id, Command.Grant(user(11)), day(0)))
     assertEquals(first, Left(Rejection.SeatLimitReached(10)))
 
-    val (afterReuse, reused) = full.handle(Request(id, Command.Revoke(user(1))))
+    val (afterReuse, reused) = full.handle(Request(id, Command.Revoke(user(1)), day(0)))
     assertEquals(reused, Left(Rejection.RequestIdReused))
     assertEquals(afterReuse.holders, users(10))
 
-    val (_, replayed) = afterReuse.handle(Request(id, Command.Grant(user(11))))
+    val (_, replayed) = afterReuse.handle(Request(id, Command.Grant(user(11)), day(0)))
     assertEquals(replayed, Left(Rejection.SeatLimitReached(10)))
   }

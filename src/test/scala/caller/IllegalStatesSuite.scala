@@ -2,12 +2,21 @@ package caller
 
 class IllegalStatesSuite extends munit.FunSuite:
 
-  test("a request takes a request ID and a user ID, each in its own place") {
-    assertEquals(compileErrors("""import licenceseats.*; Request(RequestId("r"), Command.Grant(UserId("u")))"""), "")
+  test("a request takes a request ID, a command with a user ID, and a time, each in its own place") {
+    assertEquals(
+      compileErrors("""import licenceseats.*; Request(RequestId("r"), Command.Grant(UserId("u")), java.time.Instant.EPOCH)"""),
+      ""
+    )
+  }
+
+  test("a request does not compile without a time") {
+    val errors = compileErrors("""import licenceseats.*; Request(RequestId("r"), Command.Grant(UserId("u")))""")
+    assert(clue(errors).contains("missing argument for parameter at"))
   }
 
   test("a user ID does not compile where a request ID is expected") {
-    val errors = compileErrors("""import licenceseats.*; Request(UserId("r"), Command.Grant(UserId("u")))""")
+    val errors =
+      compileErrors("""import licenceseats.*; Request(UserId("r"), Command.Grant(UserId("u")), java.time.Instant.EPOCH)""")
     assert(clue(errors).contains("Required: licenceseats.RequestId"))
   }
 

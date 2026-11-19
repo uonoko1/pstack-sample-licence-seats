@@ -21,7 +21,9 @@ class IllegalStatesSuite extends munit.FunSuite:
     assert(clue(errors).contains("Required: licenceseats.UserId"))
   }
 
-  test("a state cannot be built with holders that bypass the seat limit") {
-    val errors = compileErrors("""import licenceseats.*; new Licences(Plan.Free, Set(UserId("u")), Map.empty)""")
+  test("a state cannot be built with holders or a grace deadline that bypass the rules") {
+    val errors = compileErrors(
+      """import licenceseats.*; new Licences(Plan.Free, Set(UserId("u")), Some(java.time.Instant.EPOCH), Map.empty)"""
+    )
     assert(clue(errors).contains("cannot be accessed"))
   }

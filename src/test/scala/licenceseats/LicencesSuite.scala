@@ -1,5 +1,6 @@
 package licenceseats
 
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -10,6 +11,8 @@ class LicencesSuite extends munit.FunSuite:
   private def users(count: Int): Set[UserId] = (1 to count).map(user).toSet
 
   private val start = Instant.parse("2026-01-01T00:00:00Z")
+
+  private def day(n: Int): Instant = start.plus(Duration.ofDays(n))
 
   private def fresh(command: Command, at: Instant = start): Request =
     Request(RequestId(UUID.randomUUID().toString), command, at)
@@ -71,13 +74,14 @@ class LicencesSuite extends munit.FunSuite:
       (Plan.Standard, 31, Plan.Starter, 30)
     )
   do
-    test(s"a downgrade from $from to $to is accepted with $holders holders, and grants are rejected while they exceed it") {
-      val (downgraded, result) = withHolders(from, holders).handle(fresh(Command.ChangePlan(to)))
+    test(s"a downgrade from $from to $to with $holders holders starts a 14-day grace period that rejects grants") {
+      val (downgraded, result) = withHolders(from, holders).handle(fresh(Command.ChangePlan(to), day(3)))
       assertEquals(result, Right(()))
       assertEquals(downgraded.plan, to)
       assertEquals(downgraded.holders, users(holders))
+      assertEquals(downgraded.standing(day(3)), Standing.InGrace(day(3 + 14)))
 
-      val (_, grant) = downgraded.handle(fresh(Command.Grant(user(holders + 1))))
+      val (_, grant) = downgraded.handle(fresh(Command.Grant(user(holders + 1)), day(4)))
 
       assertEquals(grant, Left(Rejection.SeatLimitReached(seats)))
     }
@@ -93,10 +97,67 @@ class LicencesSuite extends munit.FunSuite:
 
       assertEquals(result, Right(()))
       assertEquals(downgraded.plan, to)
+      assertEquals(downgraded.standing(start), Standing.Normal)
 
       val (_, nextGrant) = downgraded.handle(fresh(Command.Grant(user(seats + 1))))
       assertEquals(nextGrant, Left(Rejection.SeatLimitReached(seats)))
     }
+
+  test("a grace period ends when revokes bring the holders within the seats") {
+    val (inGrace, _) = withHolders(Plan.Starter, 12).handle(fresh(Command.ChangePlan(Plan.Free), day(0)))
+
+    val (stillOver, firstRevoke) = inGrace.handle(fresh(Command.Revoke(user(12)), day(5)))
+    assertEquals(firstRevoke, Right(()))
+    assertEquals(stillOver.standing(day(5)), Standing.InGrace(day(14)))
+
+    val (fitting, secondRevoke) = stillOver.handle(fresh(Command.Revoke(user(11)), day(6)))
+    assertEquals(secondRevoke, Right(()))
+    assertEquals(fitting.standing(day(6)), Standing.Normal)
+    assertEquals(fitting.standing(day(30)), Standing.Normal)
+  }
+
+  test("after a grace period ends, holders who exceed the seats again get a new deadline") {
+    val (firstGrace, _) = withHolders(Plan.Standard, 31).handle(fresh(Command.ChangePlan(Plan.Starter), day(0)))
+    val (normal, _) = firstGrace.handle(fresh(Command.Revoke(user(31)), day(2)))
+    assertEquals(normal.standing(day(2)), Standing.Normal)
+
+    val (secondGrace, result) = normal.handle(fresh(Command.ChangePlan(Plan.Free), day(10)))
+
+    assertEquals(result, Right(()))
+    assertEquals(secondGrace.standing(day(10)), Standing.InGrace(day(10 + 14)))
+  }
+
+  test("a grace period expires into suspension once 14 days pass with the holders still over") {
+    val (inGrace, _) = withHolders(Plan.Starter, 11).handle(fresh(Command.ChangePlan(Plan.Free), day(0)))
+
+    assertEquals(inGrace.standing(day(14).minusNanos(1)), Standing.InGrace(day(14)))
+    assertEquals(inGrace.standing(day(14)), Standing.Suspended)
+    assertEquals(inGrace.standing(day(100)), Standing.Suspended)
+
+    val (_, grant) = inGrace.handle(fresh(Command.Grant(user(12)), day(15)))
+    assertEquals(grant, Left(Rejection.SeatLimitReached(10)))
+  }
+
+  test("a revoke that brings the holders within the seats ends a suspension") {
+    val (suspended, _) = withHolders(Plan.Starter, 11).handle(fresh(Command.ChangePlan(Plan.Free), day(0)))
+    assertEquals(suspended.standing(day(20)), Standing.Suspended)
+
+    val (fitting, revoke) = suspended.handle(fresh(Command.Revoke(user(11)), day(20)))
+
+    assertEquals(revoke, Right(()))
+    assertEquals(fitting.standing(day(20)), Standing.Normal)
+  }
+
+  test("a further downgrade during the grace period keeps the original deadline") {
+    val (inGrace, _) = withHolders(Plan.Standard, 31).handle(fresh(Command.ChangePlan(Plan.Starter), day(0)))
+
+    val (further, result) = inGrace.handle(fresh(Command.ChangePlan(Plan.Free), day(5)))
+
+    assertEquals(result, Right(()))
+    assertEquals(further.plan, Plan.Free)
+    assertEquals(further.standing(day(5)), Standing.InGrace(day(14)))
+    assertEquals(further.standing(day(14)), Standing.Suspended)
+  }
 
   test("an upgrade raises the seat limit") {
     val (upgraded, result) = withHolders(Plan.Free, 10).handle(fresh(Command.ChangePlan(Plan.Starter)))
@@ -131,6 +192,19 @@ class LicencesSuite extends munit.FunSuite:
 
     assertEquals(resent, Left(Rejection.SeatLimitReached(10)))
     assertEquals(after.holders, users(10) - user(1))
+  }
+
+  test("a downgrade resent much later returns its first result and changes nothing") {
+    val downgrade = fresh(Command.ChangePlan(Plan.Free), day(0))
+    val (inGrace, first) = withHolders(Plan.Starter, 11).handle(downgrade)
+    assertEquals(first, Right(()))
+    val (upgraded, _) = inGrace.handle(fresh(Command.ChangePlan(Plan.Starter), day(1)))
+
+    val (after, resent) = upgraded.handle(downgrade.copy(at = day(30)))
+
+    assertEquals(resent, Right(()))
+    assertEquals(after.plan, Plan.Starter)
+    assertEquals(after.standing(day(30)), Standing.Normal)
   }
 
   test("a resent revoke that was accepted revokes nothing new") {

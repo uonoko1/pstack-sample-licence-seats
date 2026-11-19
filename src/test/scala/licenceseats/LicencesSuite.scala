@@ -61,3 +61,44 @@ class LicencesSuite extends munit.FunSuite:
     assertEquals(result, Right(()))
     assertEquals(after.holders, users(3))
   }
+
+  for (from, holders, to, seats) <- List(
+      (Plan.Starter, 11, Plan.Free, 10),
+      (Plan.Standard, 11, Plan.Free, 10),
+      (Plan.Standard, 31, Plan.Starter, 30)
+    )
+  do
+    test(s"a downgrade from $from to $to is rejected with $holders holders") {
+      val (after, result) = withHolders(from, holders).handle(fresh(Command.ChangePlan(to)))
+
+      assertEquals(result, Left(Rejection.TooManyHolders(seats, holders)))
+      assertEquals(after.plan, from)
+      assertEquals(after.holders, users(holders))
+    }
+
+  for (from, to, seats) <- List(
+      (Plan.Starter, Plan.Free, 10),
+      (Plan.Standard, Plan.Free, 10),
+      (Plan.Standard, Plan.Starter, 30)
+    )
+  do
+    test(s"a downgrade from $from to $to is accepted when the holders exactly fill $to") {
+      val (downgraded, result) = withHolders(from, seats).handle(fresh(Command.ChangePlan(to)))
+
+      assertEquals(result, Right(()))
+      assertEquals(downgraded.plan, to)
+
+      val (_, nextGrant) = downgraded.handle(fresh(Command.Grant(user(seats + 1))))
+      assertEquals(nextGrant, Left(Rejection.SeatLimitReached(seats)))
+    }
+
+  test("an upgrade raises the seat limit") {
+    val (upgraded, result) = withHolders(Plan.Free, 10).handle(fresh(Command.ChangePlan(Plan.Starter)))
+    assertEquals(result, Right(()))
+    assertEquals(upgraded.plan, Plan.Starter)
+
+    val (after, grantResult) = upgraded.handle(fresh(Command.Grant(user(11))))
+
+    assertEquals(grantResult, Right(()))
+    assertEquals(after.holders, users(11))
+  }

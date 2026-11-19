@@ -12,6 +12,8 @@ final class Licences private (val plan: Plan, val holders: Set[UserId]):
         fitted(plan, holders + user).left.map(Rejection.SeatLimitReached(_))
       case Command.Revoke(user) =>
         Right(Licences(plan, holders - user))
+      case Command.ChangePlan(target) =>
+        fitted(target, holders).left.map(Rejection.TooManyHolders(_, holders.size))
 
   /** Left is the seat count that `newHolders` exceed. Only a limited plan has one. */
   private def fitted(newPlan: Plan, newHolders: Set[UserId]): Either[Int, Licences] =

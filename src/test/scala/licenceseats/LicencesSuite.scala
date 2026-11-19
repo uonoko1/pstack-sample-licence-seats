@@ -1,5 +1,6 @@
 package licenceseats
 
+import java.time.Instant
 import java.util.UUID
 
 class LicencesSuite extends munit.FunSuite:
@@ -8,8 +9,10 @@ class LicencesSuite extends munit.FunSuite:
 
   private def users(count: Int): Set[UserId] = (1 to count).map(user).toSet
 
-  private def fresh(command: Command): Request =
-    Request(RequestId(UUID.randomUUID().toString), command)
+  private val start = Instant.parse("2026-01-01T00:00:00Z")
+
+  private def fresh(command: Command, at: Instant = start): Request =
+    Request(RequestId(UUID.randomUUID().toString), command, at)
 
   private def withHolders(plan: Plan, count: Int): Licences =
     users(count).foldLeft(Licences.empty(plan)) { (licences, holder) =>
@@ -144,13 +147,13 @@ class LicencesSuite extends munit.FunSuite:
 
   test("a request ID reused for a different command is rejected, and the first command still replays") {
     val id = RequestId("reused")
-    val (full, first) = withHolders(Plan.Free, 10).handle(Request(id, Command.Grant(user(11))))
+    val (full, first) = withHolders(Plan.Free, 10).handle(Request(id, Command.Grant(user(11)), start))
     assertEquals(first, Left(Rejection.SeatLimitReached(10)))
 
-    val (afterReuse, reused) = full.handle(Request(id, Command.Revoke(user(1))))
+    val (afterReuse, reused) = full.handle(Request(id, Command.Revoke(user(1)), start))
     assertEquals(reused, Left(Rejection.RequestIdReused))
     assertEquals(afterReuse.holders, users(10))
 
-    val (_, replayed) = afterReuse.handle(Request(id, Command.Grant(user(11))))
+    val (_, replayed) = afterReuse.handle(Request(id, Command.Grant(user(11)), start))
     assertEquals(replayed, Left(Rejection.SeatLimitReached(10)))
   }

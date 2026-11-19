@@ -19,17 +19,19 @@ final class Licences private (
   private def decide(command: Command): Either[Rejection, Licences] =
     command match
       case Command.Grant(user) =>
-        fitted(plan, holders + user).left.map(Rejection.SeatLimitReached(_))
+        exceeded(plan, holders + user) match
+          case Some(seats) => Left(Rejection.SeatLimitReached(seats))
+          case None => Right(Licences(plan, holders + user, handled))
       case Command.Revoke(user) =>
         Right(Licences(plan, holders - user, handled))
       case Command.ChangePlan(target) =>
-        fitted(target, holders).left.map(Rejection.TooManyHolders(_, holders.size))
+        Right(Licences(target, holders, handled))
 
-  /** Left is the seat count that `newHolders` exceed. Only a limited plan has one. */
-  private def fitted(newPlan: Plan, newHolders: Set[UserId]): Either[Int, Licences] =
+  /** The seat count that `newHolders` exceed. Only a limited plan has one. */
+  private def exceeded(newPlan: Plan, newHolders: Set[UserId]): Option[Int] =
     newPlan.seatLimit match
-      case SeatLimit.Limited(seats) if newHolders.size > seats => Left(seats)
-      case SeatLimit.Limited(_) | SeatLimit.Unlimited => Right(Licences(newPlan, newHolders, handled))
+      case SeatLimit.Limited(seats) if newHolders.size > seats => Some(seats)
+      case SeatLimit.Limited(_) | SeatLimit.Unlimited => None
 
   private def recorded(request: Request, result: Result): Licences =
     Licences(plan, holders, handled.updated(request.id, (request.command, result)))

@@ -38,7 +38,11 @@ final class Licences private (
       case Command.Revoke(user) =>
         Right(settled(plan, holders - user, at))
       case Command.ChangePlan(target) =>
-        Right(settled(target, holders, at))
+        standing(at) match
+          case Standing.Suspended =>
+            exceeded(target, holders).map(Rejection.Suspended(_, holders.size)).toLeft(settled(target, holders, at))
+          case Standing.Normal | Standing.InGrace(_) =>
+            Right(settled(target, holders, at))
 
   /** Every accepted change goes through here, so the deadline exists exactly while the holders exceed the seats, and the first one stays until they fit. */
   private def settled(newPlan: Plan, newHolders: Set[UserId], at: Instant): Licences =

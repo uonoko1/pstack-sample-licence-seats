@@ -12,6 +12,8 @@ final case class Request(id: RequestId, command: Command, at: Instant)
 
 enum Rejection:
   case SeatLimitReached(seats: Int)
+  /** The space is suspended and its `holders` still exceed the target plan's `seats`. */
+  case Suspended(seats: Int, holders: Int)
   case RequestIdReused
 
 type Result = Either[Rejection, Unit]

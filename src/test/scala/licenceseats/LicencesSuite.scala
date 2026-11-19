@@ -159,6 +159,22 @@ class LicencesSuite extends munit.FunSuite:
     assertEquals(further.standing(day(14)), Standing.Suspended)
   }
 
+  test("a suspended space rejects a plan change the holders still exceed, and one they fit ends the suspension") {
+    val (inGrace, _) = withHolders(Plan.Standard, 31).handle(fresh(Command.ChangePlan(Plan.Free), day(0)))
+    val (_, beforeDeadline) = inGrace.handle(fresh(Command.ChangePlan(Plan.Starter), day(13)))
+    assertEquals(beforeDeadline, Right(()))
+
+    val (stillSuspended, tooSmall) = inGrace.handle(fresh(Command.ChangePlan(Plan.Starter), day(15)))
+    assertEquals(tooSmall, Left(Rejection.Suspended(30, 31)))
+    assertEquals(stillSuspended.plan, Plan.Free)
+    assertEquals(stillSuspended.standing(day(15)), Standing.Suspended)
+
+    val (restored, bigEnough) = stillSuspended.handle(fresh(Command.ChangePlan(Plan.Standard), day(16)))
+    assertEquals(bigEnough, Right(()))
+    assertEquals(restored.plan, Plan.Standard)
+    assertEquals(restored.standing(day(16)), Standing.Normal)
+  }
+
   test("an upgrade raises the seat limit") {
     val (upgraded, result) = withHolders(Plan.Free, 10).handle(fresh(Command.ChangePlan(Plan.Starter)))
     assertEquals(result, Right(()))
@@ -205,6 +221,19 @@ class LicencesSuite extends munit.FunSuite:
     assertEquals(resent, Right(()))
     assertEquals(after.plan, Plan.Starter)
     assertEquals(after.standing(day(30)), Standing.Normal)
+  }
+
+  test("a plan change rejected during a suspension is rejected again when resent, even after the holders fit") {
+    val (suspended, _) = withHolders(Plan.Standard, 31).handle(fresh(Command.ChangePlan(Plan.Free), day(0)))
+    val change = fresh(Command.ChangePlan(Plan.Starter), day(15))
+    val (rejected, first) = suspended.handle(change)
+    assertEquals(first, Left(Rejection.Suspended(30, 31)))
+    val (fitsStarter, _) = rejected.handle(fresh(Command.Revoke(user(31)), day(16)))
+
+    val (after, resent) = fitsStarter.handle(change.copy(at = day(17)))
+
+    assertEquals(resent, Left(Rejection.Suspended(30, 31)))
+    assertEquals(after.plan, Plan.Free)
   }
 
   test("a resent revoke that was accepted revokes nothing new") {

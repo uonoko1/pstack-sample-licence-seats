@@ -74,13 +74,31 @@ class LicencesSuite extends munit.FunSuite:
       (Plan.Standard, 31, Plan.Starter, 30)
     )
   do
-    test(s"a downgrade from $from to $to is rejected with $holders holders") {
-      val (after, result) = withHolders(from, holders).handle(fresh(Command.ChangePlan(to)))
+    test(s"a downgrade from $from to $to is accepted with $holders holders, and grants stop until they fit") {
+      val (downgraded, result) = withHolders(from, holders).handle(fresh(Command.ChangePlan(to)))
+      assertEquals(result, Right(()))
+      assertEquals(downgraded.plan, to)
+      assertEquals(downgraded.holders, users(holders))
 
-      assertEquals(result, Left(Rejection.TooManyHolders(seats, holders)))
-      assertEquals(after.plan, from)
-      assertEquals(after.holders, users(holders))
+      val (_, grantOverLimit) = downgraded.handle(fresh(Command.Grant(user(holders + 1))))
+      assertEquals(grantOverLimit, Left(Rejection.SeatLimitReached(seats)))
+
+      val (fitting, revoke) = downgraded.handle(fresh(Command.Revoke(user(holders))))
+      assertEquals(revoke, Right(()))
+      assertEquals(fitting.holders, users(seats))
+
+      val (_, grantWhenFull) = fitting.handle(fresh(Command.Grant(user(holders + 1))))
+      assertEquals(grantWhenFull, Left(Rejection.SeatLimitReached(seats)))
     }
+
+  test("while the holders exceed the seat limit, a grant is rejected even for a user who already holds a licence") {
+    val (crowded, _) = withHolders(Plan.Starter, 11).handle(fresh(Command.ChangePlan(Plan.Free)))
+
+    val (after, result) = crowded.handle(fresh(Command.Grant(user(1))))
+
+    assertEquals(result, Left(Rejection.SeatLimitReached(10)))
+    assertEquals(after.holders, users(11))
+  }
 
   for (from, to, seats) <- List(
       (Plan.Starter, Plan.Free, 10),
@@ -131,18 +149,6 @@ class LicencesSuite extends munit.FunSuite:
 
     assertEquals(resent, Left(Rejection.SeatLimitReached(10)))
     assertEquals(after.holders, users(10) - user(1))
-  }
-
-  test("a resent downgrade that was rejected is rejected again, even after the holders fit") {
-    val downgrade = fresh(Command.ChangePlan(Plan.Free))
-    val (crowded, first) = withHolders(Plan.Starter, 11).handle(downgrade)
-    assertEquals(first, Left(Rejection.TooManyHolders(10, 11)))
-    val (fitting, _) = crowded.handle(fresh(Command.Revoke(user(11))))
-
-    val (after, resent) = fitting.handle(downgrade)
-
-    assertEquals(resent, Left(Rejection.TooManyHolders(10, 11)))
-    assertEquals(after.plan, Plan.Starter)
   }
 
   test("a resent revoke that was accepted revokes nothing new") {

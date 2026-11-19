@@ -16,20 +16,18 @@ final class Licences private (
         val result = decision.map(_ => ())
         (decision.getOrElse(this).recorded(request, result), result)
 
+  /** A downgrade may leave more holders than seats. No grant is accepted until they fit again. */
   private def decide(command: Command): Either[Rejection, Licences] =
     command match
       case Command.Grant(user) =>
-        fitted(plan, holders + user).left.map(Rejection.SeatLimitReached(_))
+        val granted = holders + user
+        plan.seatLimit.exceededBy(granted.size) match
+          case Some(seats) => Left(Rejection.SeatLimitReached(seats))
+          case None => Right(Licences(plan, granted, handled))
       case Command.Revoke(user) =>
         Right(Licences(plan, holders - user, handled))
       case Command.ChangePlan(target) =>
-        fitted(target, holders).left.map(Rejection.TooManyHolders(_, holders.size))
-
-  /** Left is the seat count that `newHolders` exceed. Only a limited plan has one. */
-  private def fitted(newPlan: Plan, newHolders: Set[UserId]): Either[Int, Licences] =
-    newPlan.seatLimit match
-      case SeatLimit.Limited(seats) if newHolders.size > seats => Left(seats)
-      case SeatLimit.Limited(_) | SeatLimit.Unlimited => Right(Licences(newPlan, newHolders, handled))
+        Right(Licences(target, holders, handled))
 
   private def recorded(request: Request, result: Result): Licences =
     Licences(plan, holders, handled.updated(request.id, (request.command, result)))

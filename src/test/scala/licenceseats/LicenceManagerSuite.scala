@@ -32,6 +32,17 @@ class LicenceManagerSuite extends munit.FunSuite:
     go.countDown()
     pending.map(_.get(10, TimeUnit.SECONDS))
 
+  test("a batch of requests is handled in order") {
+    val manager = LicenceManager(Plan.Free)
+
+    val results = manager.handleAll(
+      (1 to 11).map(n => Request(RequestId(s"batch-$n"), Command.Grant(UserId(s"user-$n")), Instant.EPOCH))
+    )
+
+    assertEquals(results, Seq.fill(10)(Right(())) :+ Left(Rejection.SeatLimitReached(10)))
+    assertEquals(manager.licences.holders.size, 10)
+  }
+
   pool.test("concurrent grants to different users never exceed the seat limit") { pool =>
     for _ <- 1 to rounds do
       val manager = LicenceManager(Plan.Free)

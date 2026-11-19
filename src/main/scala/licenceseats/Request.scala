@@ -12,6 +12,7 @@ final case class Request(id: RequestId, at: Instant, command: Command)
 
 enum Rejection:
   case SeatLimitReached(seats: Int)
+  case SpaceSuspended(seats: Int, holders: Int)
   case RequestIdReused
 
 type Result = Either[Rejection, Unit]

@@ -50,3 +50,23 @@ class LicenceManagerSuite extends munit.FunSuite:
       assertEquals(rejections, Seq.fill(54)(Rejection.SeatLimitReached(10)))
       assertEquals(manager.licences.holders, accepted.toSet)
   }
+
+  pool.test("concurrent grants and revokes in a grace period never add a holder") { pool =>
+    val downgradedAt = Instant.parse("2026-01-01T00:00:00Z")
+    for _ <- 1 to rounds do
+      val manager = LicenceManager(Plan.Starter)
+      for n <- 1 to 12 do manager.handle(Request(RequestId(s"seed-$n"), downgradedAt, Command.Grant(UserId(s"user-$n"))))
+      manager.handle(Request(RequestId("downgrade"), downgradedAt, Command.ChangePlan(Plan.Free)))
+
+      val grants = (13 to contenders).map { n =>
+        () => manager.handle(Request(RequestId(s"grant-$n"), downgradedAt, Command.Grant(UserId(s"user-$n"))))
+      }
+      val revokes = (11 to 12).map { n =>
+        () => manager.handle(Request(RequestId(s"revoke-$n"), downgradedAt, Command.Revoke(UserId(s"user-$n"))))
+      }
+      val results = race(pool, grants ++ revokes)
+
+      assertEquals(results.count(_.isRight), 2)
+      assertEquals(manager.licences.holders, (1 to 10).map(n => UserId(s"user-$n")).toSet)
+      assertEquals(manager.licences.standing(downgradedAt), Standing.Normal)
+  }

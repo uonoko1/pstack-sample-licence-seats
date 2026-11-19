@@ -102,3 +102,62 @@ class LicencesSuite extends munit.FunSuite:
     assertEquals(grantResult, Right(()))
     assertEquals(after.holders, users(11))
   }
+
+  test("a resent grant that was accepted is accepted again and grants nothing new") {
+    val grant = fresh(Command.Grant(user(1)))
+    val (granted, first) = Licences.empty(Plan.Free).handle(grant)
+    assertEquals(first, Right(()))
+    val (revoked, _) = granted.handle(fresh(Command.Revoke(user(1))))
+
+    val (after, resent) = revoked.handle(grant)
+
+    assertEquals(resent, Right(()))
+    assertEquals(after.holders, Set.empty[UserId])
+  }
+
+  test("a resent grant that was rejected is rejected again, even after a seat is freed") {
+    val grant = fresh(Command.Grant(user(11)))
+    val (full, first) = withHolders(Plan.Free, 10).handle(grant)
+    assertEquals(first, Left(Rejection.SeatLimitReached(10)))
+    val (freed, _) = full.handle(fresh(Command.Revoke(user(1))))
+
+    val (after, resent) = freed.handle(grant)
+
+    assertEquals(resent, Left(Rejection.SeatLimitReached(10)))
+    assertEquals(after.holders, users(10) - user(1))
+  }
+
+  test("a resent downgrade that was rejected is rejected again, even after the holders fit") {
+    val downgrade = fresh(Command.ChangePlan(Plan.Free))
+    val (crowded, first) = withHolders(Plan.Starter, 11).handle(downgrade)
+    assertEquals(first, Left(Rejection.TooManyHolders(10, 11)))
+    val (fitting, _) = crowded.handle(fresh(Command.Revoke(user(11))))
+
+    val (after, resent) = fitting.handle(downgrade)
+
+    assertEquals(resent, Left(Rejection.TooManyHolders(10, 11)))
+    assertEquals(after.plan, Plan.Starter)
+  }
+
+  test("a resent revoke that was accepted revokes nothing new") {
+    val revoke = fresh(Command.Revoke(user(1)))
+    val (revoked, first) = withHolders(Plan.Free, 1).handle(revoke)
+    assertEquals(first, Right(()))
+    val (regranted, _) = revoked.handle(fresh(Command.Grant(user(1))))
+
+    val (after, resent) = regranted.handle(revoke)
+
+    assertEquals(resent, Right(()))
+    assertEquals(after.holders, users(1))
+  }
+
+  test("a request ID that was already handled returns its first result, whatever the command") {
+    val id = RequestId("reused")
+    val (full, first) = withHolders(Plan.Free, 10).handle(Request(id, Command.Grant(user(11))))
+    assertEquals(first, Left(Rejection.SeatLimitReached(10)))
+
+    val (after, second) = full.handle(Request(id, Command.Revoke(user(1))))
+
+    assertEquals(second, Left(Rejection.SeatLimitReached(10)))
+    assertEquals(after.holders, users(10))
+  }

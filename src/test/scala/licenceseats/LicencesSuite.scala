@@ -151,13 +151,15 @@ class LicencesSuite extends munit.FunSuite:
     assertEquals(after.holders, users(1))
   }
 
-  test("a request ID that was already handled returns its first result, whatever the command") {
+  test("a request ID reused for a different command is rejected, and the first command still replays") {
     val id = RequestId("reused")
     val (full, first) = withHolders(Plan.Free, 10).handle(Request(id, Command.Grant(user(11))))
     assertEquals(first, Left(Rejection.SeatLimitReached(10)))
 
-    val (after, second) = full.handle(Request(id, Command.Revoke(user(1))))
+    val (afterReuse, reused) = full.handle(Request(id, Command.Revoke(user(1))))
+    assertEquals(reused, Left(Rejection.RequestIdReused))
+    assertEquals(afterReuse.holders, users(10))
 
-    assertEquals(second, Left(Rejection.SeatLimitReached(10)))
-    assertEquals(after.holders, users(10))
+    val (_, replayed) = afterReuse.handle(Request(id, Command.Grant(user(11))))
+    assertEquals(replayed, Left(Rejection.SeatLimitReached(10)))
   }

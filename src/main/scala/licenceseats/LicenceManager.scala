@@ -8,16 +8,18 @@ final class LicenceManager(plan: Plan):
 
   def licences: Licences = state.get()
 
-  @tailrec
-  def handle(request: Request): Result =
-    val current = state.get()
-    val (next, result) = current.handle(request)
-    if state.compareAndSet(current, next) then result else handle(request)
+  def handle(request: Request): Result = atomically(_.handle(request))
 
   def handleAll(requests: Seq[Request]): Seq[Result] =
-    val (next, results) = requests.foldLeft((state.get(), Vector.empty[Result])) { case ((licences, results), request) =>
-      val (after, result) = licences.handle(request)
-      (after, results :+ result)
+    atomically { start =>
+      requests.foldLeft((start, Vector.empty[Result])) { case ((licences, results), request) =>
+        val (after, result) = licences.handle(request)
+        (after, results :+ result)
+      }
     }
-    state.set(next)
-    results
+
+  @tailrec
+  private def atomically[A](change: Licences => (Licences, A)): A =
+    val current = state.get()
+    val (next, result) = change(current)
+    if state.compareAndSet(current, next) then result else atomically(change)

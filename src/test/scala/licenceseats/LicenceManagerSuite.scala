@@ -1,0 +1,89 @@
+package licenceseats
+
+import java.time.Instant
+import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+
+class LicenceManagerSuite extends munit.FunSuite:
+
+  private val contenders = 64
+  private val rounds = 200
+
+  private val pool = FunFixture[ExecutorService](
+    setup = _ => Executors.newFixedThreadPool(contenders),
+    teardown = _.shutdownNow()
+  )
+
+  /** Holds every task at one gate, then releases them together. */
+  private def race[A](pool: ExecutorService, tasks: Seq[() => A]): Seq[A] =
+    val ready = CountDownLatch(tasks.size)
+    val go = CountDownLatch(1)
+    val pending = tasks.map { task =>
+      val gated: Callable[A] = () =>
+        ready.countDown()
+        go.await()
+        task()
+      pool.submit(gated)
+    }
+    ready.await()
+    go.countDown()
+    pending.map(_.get(10, TimeUnit.SECONDS))
+
+  test("a batch of requests is handled in order") {
+    val manager = LicenceManager(Plan.Free)
+
+    val results = manager.handleAll(
+      (1 to 11).map(n => Request(RequestId(s"batch-$n"), Command.Grant(UserId(s"user-$n")), Instant.EPOCH))
+    )
+
+    assertEquals(results, Seq.fill(10)(Right(())) :+ Left(Rejection.SeatLimitReached(10)))
+    assertEquals(manager.licences.holders.size, 10)
+  }
+
+  pool.test("concurrent grants to different users never exceed the seat limit") { pool =>
+    for _ <- 1 to rounds do
+      val manager = LicenceManager(Plan.Free)
+
+      val results = race(
+        pool,
+        (1 to contenders).map { n =>
+          val user = UserId(s"user-$n")
+          () => user -> manager.handle(Request(RequestId(s"grant-$n"), Command.Grant(user), Instant.EPOCH))
+        }
+      )
+
+      val accepted = results.collect { case (user, Right(())) => user }
+      val rejections = results.collect { case (_, Left(rejection)) => rejection }
+      assertEquals(accepted.size, 10)
+      assertEquals(rejections, Seq.fill(54)(Rejection.SeatLimitReached(10)))
+      assertEquals(manager.licences.holders, accepted.toSet)
+  }
+
+  pool.test("a grant made while a batch is in flight keeps its licence and counts against the seat limit") { pool =>
+    val manager = LicenceManager(Plan.Free)
+    val batchUsers = (1 to 10).map(n => UserId(s"batch-$n"))
+    val solo = UserId("solo")
+    def grant(user: UserId) = Request(RequestId(s"grant-${user.value}"), Command.Grant(user), Instant.EPOCH)
+    val batchStarted = CountDownLatch(1)
+    val soloHandled = CountDownLatch(1)
+    val batch = LazyList.tabulate(batchUsers.size) { n =>
+      if n == batchUsers.size / 2 then
+        batchStarted.countDown()
+        soloHandled.await(10, TimeUnit.SECONDS)
+      grant(batchUsers(n))
+    }
+    val handleBatch: Callable[Seq[Result]] = () => manager.handleAll(batch)
+
+    val batchResults = pool.submit(handleBatch)
+    batchStarted.await(10, TimeUnit.SECONDS)
+    val soloResult = manager.handle(grant(solo))
+    soloHandled.countDown()
+
+    val results = batchUsers.zip(batchResults.get(10, TimeUnit.SECONDS)) :+ (solo -> soloResult)
+    val accepted = results.collect { case (user, Right(())) => user }
+    assertEquals(manager.licences.holders, accepted.toSet)
+    assertEquals(accepted.size, 10)
+  }

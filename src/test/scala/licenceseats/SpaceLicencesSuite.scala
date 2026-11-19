@@ -341,6 +341,16 @@ class SpaceLicencesSuite extends munit.FunSuite:
     assertEquals(licences.grant(id, user(1), t0), Right(Applied(Plan.Free, 1, Standing.Normal)))
   }
 
+  test("a batch of commands is applied in order") {
+    val licences = SpaceLicences(Plan.Free)
+
+    val results = licences.submitAll((1 to 11).map(n => (freshId(), Command.Grant(user(n)))), t0)
+
+    assertEquals(results.take(10).count(_.isRight), 10)
+    assertEquals(results.last, Left(Rejection.SeatLimitReached(Plan.Free, 10)))
+    assertEquals(licences.usedSeats, 10)
+  }
+
   test("concurrent grants never exceed the seat limit") {
     (1 to 20).foreach { round =>
       val licences = SpaceLicences(Plan.Starter)

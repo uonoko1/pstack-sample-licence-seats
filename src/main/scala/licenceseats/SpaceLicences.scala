@@ -33,6 +33,14 @@ final class SpaceLicences(initialPlan: Plan):
     }
     result
 
+  def submitAll(commands: Seq[(RequestId, Command)], now: Instant): Seq[Result] =
+    val (next, results) = commands.foldLeft((ledger.get, Vector.empty[Result])) { case ((current, results), (requestId, command)) =>
+      val (after, result) = current.handle(requestId, command, now)
+      (after, results :+ result)
+    }
+    ledger.set(next)
+    results
+
   def plan: Plan = ledger.get.plan
 
   /** The standing of the space at `now`: normal, in grace with its deadline, or suspended. */

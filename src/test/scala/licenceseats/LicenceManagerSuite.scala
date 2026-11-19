@@ -1,5 +1,6 @@
 package licenceseats
 
+import java.time.Instant
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
@@ -39,7 +40,7 @@ class LicenceManagerSuite extends munit.FunSuite:
         pool,
         (1 to contenders).map { n =>
           val user = UserId(s"user-$n")
-          () => user -> manager.handle(Request(RequestId(s"grant-$n"), Command.Grant(user)))
+          () => user -> manager.handle(Request(RequestId(s"grant-$n"), Instant.EPOCH, Command.Grant(user)))
         }
       )
 

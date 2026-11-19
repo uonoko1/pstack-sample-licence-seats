@@ -3,11 +3,11 @@ package caller
 class IllegalStatesSuite extends munit.FunSuite:
 
   test("a request takes a request ID and a user ID, each in its own place") {
-    assertEquals(compileErrors("""import licenceseats.*; Request(RequestId("r"), Command.Grant(UserId("u")))"""), "")
+    assertEquals(compileErrors("""import licenceseats.*; Request(RequestId("r"), java.time.Instant.EPOCH, Command.Grant(UserId("u")))"""), "")
   }
 
   test("a user ID does not compile where a request ID is expected") {
-    val errors = compileErrors("""import licenceseats.*; Request(UserId("r"), Command.Grant(UserId("u")))""")
+    val errors = compileErrors("""import licenceseats.*; Request(UserId("r"), java.time.Instant.EPOCH, Command.Grant(UserId("u")))""")
     assert(clue(errors).contains("Required: licenceseats.RequestId"))
   }
 

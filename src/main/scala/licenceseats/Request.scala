@@ -1,11 +1,14 @@
 package licenceseats
 
+import java.time.Instant
+
 enum Command:
   case Grant(user: UserId)
   case Revoke(user: UserId)
   case ChangePlan(plan: Plan)
 
-final case class Request(id: RequestId, command: Command)
+/** `at` is the caller's current time. The library reads no clock of its own. */
+final case class Request(id: RequestId, at: Instant, command: Command)
 
 enum Rejection:
   case SeatLimitReached(seats: Int)

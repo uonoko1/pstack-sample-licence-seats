@@ -368,6 +368,48 @@ class SpaceLicencesSuite extends munit.FunSuite:
     }
   }
 
+  test("a batch racing with single grants neither exceeds the limit nor loses a reported grant") {
+    (1 to 300).foreach { round =>
+      val licences = SpaceLicences(Plan.Free)
+      val batchUsers = (1 to 8).map(user)
+      val singleUsers = (9 to 16).map(user)
+      val batch = () =>
+        batchUsers.zip(
+          licences.submitAll(
+            batchUsers.map(u => (RequestId(s"batch-$round-${u.value}"), Command.Grant(u))),
+            t0
+          )
+        )
+      val singles = singleUsers.map { u => () =>
+        Seq(u -> licences.grant(RequestId(s"single-$round-${u.value}"), u, t0))
+      }
+      val outcomes = runTogether(batch +: singles).flatten
+      val granted = outcomes.collect { case (u, Right(_)) => u }.toSet
+      // 16 grants compete for 10 seats: exactly 10 succeed, and they are the ones holding a seat.
+      assertEquals(granted.size, 10, s"round $round")
+      assertEquals(licences.holders, granted, s"round $round")
+      assertEquals(
+        outcomes.collect { case (_, Left(rejection)) => rejection }.toSet,
+        Set[Rejection](Rejection.SeatLimitReached(Plan.Free, 10))
+      )
+    }
+  }
+
+  test("a request handled while a batch was running is still replayed afterwards") {
+    (1 to 300).foreach { round =>
+      val licences = SpaceLicences(Plan.Standard)
+      val batch = () =>
+        licences.submitAll((1 to 8).map(n => (RequestId(s"b-$round-$n"), Command.Grant(user(n)))), t0)
+      val singles = (9 to 16).map { n => () =>
+        Seq(licences.grant(RequestId(s"s-$round-$n"), user(n), t0))
+      }
+      val firstResults = runTogether(singles :+ batch).init.flatten
+      val resent = (9 to 16).map(n => licences.grant(RequestId(s"s-$round-$n"), user(n), t0))
+      assertEquals(resent, firstResults, s"round $round")
+      assertEquals(licences.usedSeats, 16, s"round $round")
+    }
+  }
+
   test("concurrent resends of one request take a single seat and all see the same result") {
     (1 to 20).foreach { round =>
       val licences = SpaceLicences(Plan.Free)

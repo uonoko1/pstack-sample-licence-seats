@@ -2,6 +2,7 @@ package licenceseats
 
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.tailrec
 
 /** Thread-safe, in-memory licence seats of a single space.
   *
@@ -23,23 +24,29 @@ final class SpaceLicences(initialPlan: Plan):
     submit(requestId, Command.ChangePlan(plan), now)
 
   def submit(requestId: RequestId, command: Command, now: Instant): Result =
-    // Compare-and-set retry: the check and the update are computed from one snapshot and only
-    // published if nobody else changed the state in between.
-    var result: Result = null
-    ledger.updateAndGet { current =>
-      val (next, r) = current.handle(requestId, command, now)
-      result = r
-      next
-    }
-    result
+    transact(_.handle(requestId, command, now))
 
+  /** Applies `commands` in order as one atomic step: no other request is interleaved with them,
+    * and each result is the one a later resend of that request ID will get.
+    */
   def submitAll(commands: Seq[(RequestId, Command)], now: Instant): Seq[Result] =
-    val (next, results) = commands.foldLeft((ledger.get, Vector.empty[Result])) { case ((current, results), (requestId, command)) =>
-      val (after, result) = current.handle(requestId, command, now)
-      (after, results :+ result)
+    transact { start =>
+      commands.foldLeft((start, Vector.empty[Result])) { case ((current, results), (requestId, command)) =>
+        val (after, result) = current.handle(requestId, command, now)
+        (after, results :+ result)
+      }
     }
-    ledger.set(next)
-    results
+
+  /** The only way the ledger is ever written. `step` computes the next state and an outcome from
+    * one snapshot, and the pair is published only if nobody else changed the state in between;
+    * otherwise it is recomputed from the newer state. So an outcome is never returned for a state
+    * that was not stored, and no concurrent update is overwritten.
+    */
+  @tailrec
+  private def transact[A](step: SeatLedger => (SeatLedger, A)): A =
+    val current = ledger.get
+    val (next, outcome) = step(current)
+    if ledger.compareAndSet(current, next) then outcome else transact(step)
 
   def plan: Plan = ledger.get.plan
 
